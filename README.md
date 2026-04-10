@@ -28,9 +28,14 @@ The project uses a React frontend with pre-generated raster tiles and click-quer
 ### Input data kept in the repo
 
 - `data/raw/hazard/temp_dist_nairobi.tif`
-- `data/raw/population/ken_pop_2025_CN_100m_R2025A_v1.tif`
 - `data/raw/population/ken_pop_nairobi_100m.tif`
 - `data/raw/vulnerability/population_composite_nairobi.tif`
+
+### Local-only preprocessing input not committed
+
+- `data/raw/population/ken_pop_2025_CN_100m_R2025A_v1.tif`
+  - Used only to produce the Nairobi-cropped population raster.
+  - Not required for running the app if `ken_pop_nairobi_100m.tif` is already present.
 
 ### Generated files not committed
 
@@ -89,5 +94,6 @@ npm run build
 
 ## Notes
 
-- The repo keeps the raw Nairobi input rasters so others can reproduce the generated web assets locally.
+- The repo keeps the Nairobi-level input rasters so others can reproduce the generated web assets locally.
+- The full-country Kenya population raster is intentionally excluded from version control because it is large and only needed for the one-time crop step.
 - Generated tiles are intentionally excluded from version control because they are large and can be rebuilt with `npm run data:build`.

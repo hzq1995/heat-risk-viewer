@@ -3,6 +3,7 @@ frontend/dist/
 frontend/.vite/
 frontend/public/data/
 data/derived/
+data/raw/population/ken_pop_2025_CN_100m_R2025A_v1.tif
 __pycache__/
 .pytest_cache/
 *.pyc
