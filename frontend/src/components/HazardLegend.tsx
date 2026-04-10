@@ -1,14 +1,29 @@
-import type { HazardMetadata } from "../types";
-
-type HazardLegendProps = {
-  metadata: HazardMetadata;
+type LegendStop = {
+  value: number;
+  color: string;
 };
 
-export function HazardLegend({ metadata }: HazardLegendProps) {
-  const gradient = metadata.legendStops
+type HazardLegendProps = {
+  title: string;
+  unitLabel: string;
+  domain: [number, number];
+  stops: LegendStop[];
+};
+
+function formatLegendValue(value: number): string {
+  if (value >= 1000) {
+    return value.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  }
+  if (value >= 10) {
+    return value.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  }
+  return value.toLocaleString("en-US", { maximumFractionDigits: 2 });
+}
+
+export function HazardLegend({ title, unitLabel, domain, stops }: HazardLegendProps) {
+  const gradient = stops
     .map((stop) => {
-      const percentage =
-        ((stop.value - metadata.legendDomain[0]) / (metadata.legendDomain[1] - metadata.legendDomain[0])) * 100;
+      const percentage = ((stop.value - domain[0]) / (domain[1] - domain[0])) * 100;
       return `${stop.color} ${percentage}%`;
     })
     .join(", ");
@@ -16,16 +31,16 @@ export function HazardLegend({ metadata }: HazardLegendProps) {
   return (
     <section className="panel-block">
       <div className="panel-heading">
-        <span>Hazard legend</span>
+        <span>{title}</span>
         <small>
-          {metadata.legendDomain[0]} - {metadata.legendDomain[1]} days
+          {formatLegendValue(domain[0])} - {formatLegendValue(domain[1])} {unitLabel}
         </small>
       </div>
       <div className="legend-swatch" style={{ background: `linear-gradient(90deg, ${gradient})` }} />
       <div className="legend-scale">
-        <span>{metadata.legendDomain[0]}</span>
-        <span>{Math.round((metadata.legendDomain[0] + metadata.legendDomain[1]) / 2)}</span>
-        <span>{metadata.legendDomain[1]}</span>
+        <span>{formatLegendValue(domain[0])}</span>
+        <span>{formatLegendValue((domain[0] + domain[1]) / 2)}</span>
+        <span>{formatLegendValue(domain[1])}</span>
       </div>
     </section>
   );

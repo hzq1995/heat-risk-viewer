@@ -1,6 +1,8 @@
 import type { ThresholdStats } from "../types";
 
 type StatsPanelProps = {
+  title: string;
+  subtitle: string;
   stats: ThresholdStats;
 };
 
@@ -9,12 +11,12 @@ const formatters = {
   integer: new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }),
 };
 
-export function StatsPanel({ stats }: StatsPanelProps) {
+export function StatsPanel({ title, subtitle, stats }: StatsPanelProps) {
   return (
     <section className="panel-block">
       <div className="panel-heading">
-        <span>Map summary</span>
-        <small>Valid-pixel statistics</small>
+        <span>{title}</span>
+        <small>{subtitle}</small>
       </div>
       <div className="stats-grid">
         <article className="stat-card">

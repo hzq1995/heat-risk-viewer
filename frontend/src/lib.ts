@@ -1,9 +1,11 @@
-import type { HazardMetadata } from "./types";
+import type { ViewerMetadata, ViewerMode } from "./types";
+
+export type GridTransform = [number, number, number, number, number, number];
 
 export function rowColFromLngLat(
   lng: number,
   lat: number,
-  transform: HazardMetadata["transform"],
+  transform: GridTransform,
 ): { row: number; col: number } {
   const [a, b, c, d, e, f] = transform;
   const det = a * e - b * d;
@@ -23,16 +25,41 @@ export function hazardDaysForThreshold(bins: number[], threshold: number): numbe
   return bins.reduce((total, value, index) => total + (index >= threshold ? value : 0), 0);
 }
 
-export function pixelChunkUrl(metadata: HazardMetadata, chunkRow: number, chunkCol: number): string {
-  return `/data/${metadata.pixelChunks.pathTemplate
-    .replace("{row}", String(chunkRow))
-    .replace("{col}", String(chunkCol))}`;
+export function resolveTemplate(template: string, values: Record<string, string | number>): string {
+  return Object.entries(values).reduce(
+    (result, [key, value]) => result.replaceAll(`{${key}}`, String(value)),
+    template,
+  );
+}
+
+export function modeTileUrl(metadata: ViewerMetadata, mode: ViewerMode, threshold: number): string {
+  return `/data/${resolveTemplate(metadata.modes[mode].tilesPathTemplate, {
+    threshold,
+    z: "{z}",
+    x: "{x}",
+    y: "{y}",
+  })}`;
+}
+
+export function hazardPixelChunkUrl(metadata: ViewerMetadata, chunkRow: number, chunkCol: number): string {
+  return `/data/${resolveTemplate(metadata.modes.hazard.pixelQuery.pathTemplate, {
+    row: chunkRow,
+    col: chunkCol,
+  })}`;
+}
+
+export function riskPixelChunkUrl(metadata: ViewerMetadata, threshold: number, chunkRow: number, chunkCol: number): string {
+  return `/data/${resolveTemplate(metadata.modes.heatRisk.pixelQuery.pathTemplate, {
+    threshold,
+    row: chunkRow,
+    col: chunkCol,
+  })}`;
 }
 
 export function lngLatFromRasterCell(
   row: number,
   col: number,
-  transform: HazardMetadata["transform"],
+  transform: GridTransform,
 ): { lng: number; lat: number } {
   const [a, b, c, d, e, f] = transform;
   return {
@@ -44,7 +71,7 @@ export function lngLatFromRasterCell(
 export function pixelGeometry(
   row: number,
   col: number,
-  transform: HazardMetadata["transform"],
+  transform: GridTransform,
 ): {
   center: [number, number];
   polygon: [number, number][];

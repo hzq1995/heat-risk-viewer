@@ -8,18 +8,31 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 import { DistributionChart } from "./components/DistributionChart";
 import { HazardLegend } from "./components/HazardLegend";
+import { HeatRiskDetailPanel } from "./components/HeatRiskDetailPanel";
 import { StatsPanel } from "./components/StatsPanel";
-import { hazardDaysForThreshold, insideRaster, pixelChunkUrl, pixelGeometry, rowColFromLngLat } from "./lib";
-import type { HazardMetadata, PixelDistribution } from "./types";
+import {
+  hazardDaysForThreshold,
+  hazardPixelChunkUrl,
+  insideRaster,
+  modeTileUrl,
+  pixelGeometry,
+  riskPixelChunkUrl,
+  rowColFromLngLat,
+} from "./lib";
+import type {
+  HeatRiskPixelDetail,
+  HazardPixelDistribution,
+  ViewerMetadata,
+  ViewerMode,
+} from "./types";
 
 const BASEMAP_STYLE = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
 const PIXEL_SOURCE_ID = "selected-pixel";
-const HAZARD_LAYER_PREFIX = "hazard-layer-";
-const HAZARD_SOURCE_PREFIX = "hazard-source-";
 const HAZARD_TARGET_OPACITY = 0.68;
 const HAZARD_SWITCH_DURATION_MS = 420;
 
-type SelectedPixelBase = Omit<PixelDistribution, "hazardDays">;
+type SelectedHazardBase = Omit<HazardPixelDistribution, "hazardDays">;
+type SelectedRiskLocation = Omit<HeatRiskPixelDetail, "hazard" | "population" | "vulnerability" | "heatRisk">;
 
 function emptyPixelFeatureCollection() {
   return {
@@ -31,7 +44,7 @@ function emptyPixelFeatureCollection() {
 function pixelFeatureCollection(
   row: number,
   col: number,
-  transform: HazardMetadata["transform"],
+  transform: ViewerMetadata["modes"]["hazard"]["rasterGrid"]["transform"],
 ) {
   const geometry = pixelGeometry(row, col, transform);
   return {
@@ -57,15 +70,15 @@ function pixelFeatureCollection(
   };
 }
 
-function layerIdForThreshold(threshold: number): string {
-  return `${HAZARD_LAYER_PREFIX}${threshold}`;
+function layerIdFor(mode: ViewerMode, threshold: number): string {
+  return `${mode}-layer-${threshold}`;
 }
 
-function sourceIdForThreshold(threshold: number): string {
-  return `${HAZARD_SOURCE_PREFIX}${threshold}`;
+function sourceIdFor(mode: ViewerMode, threshold: number): string {
+  return `${mode}-source-${threshold}`;
 }
 
-function findHazardInsertBeforeId(map: MapLibreMap): string | undefined {
+function findRasterInsertBeforeId(map: MapLibreMap): string | undefined {
   const layers = map.getStyle().layers ?? [];
   const preferredLayer = layers.find((layer) => {
     const id = layer.id.toLowerCase();
@@ -77,33 +90,47 @@ function findHazardInsertBeforeId(map: MapLibreMap): string | undefined {
   return layers.find((layer) => layer.type === "symbol")?.id;
 }
 
-function hideInactiveHazardLayers(map: MapLibreMap, thresholds: number[], activeThreshold: number) {
-  for (const threshold of thresholds) {
-    const layerId = layerIdForThreshold(threshold);
-    if (!map.getLayer(layerId)) {
-      continue;
+function hideInactiveRasterLayers(
+  map: MapLibreMap,
+  metadata: ViewerMetadata,
+  activeMode: ViewerMode,
+  activeThreshold: number,
+) {
+  for (const mode of metadata.availableModes) {
+    for (const threshold of metadata.thresholds) {
+      const layerId = layerIdFor(mode, threshold);
+      if (!map.getLayer(layerId)) {
+        continue;
+      }
+      const visible = mode === activeMode && threshold === activeThreshold;
+      map.setLayoutProperty(layerId, "visibility", visible ? "visible" : "none");
+      map.setPaintProperty(layerId, "raster-opacity", visible ? HAZARD_TARGET_OPACITY : 0);
     }
-    if (threshold === activeThreshold) {
-      map.setLayoutProperty(layerId, "visibility", "visible");
-      map.setPaintProperty(layerId, "raster-opacity", HAZARD_TARGET_OPACITY);
-      continue;
-    }
-    map.setLayoutProperty(layerId, "visibility", "none");
-    map.setPaintProperty(layerId, "raster-opacity", 0);
   }
 }
 
 function App() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
-  const currentVisibleThresholdRef = useRef<number | null>(null);
+  const currentVisibleLayerKeyRef = useRef<string | null>(null);
   const thresholdHideTimeoutRef = useRef<number | null>(null);
-  const [metadata, setMetadata] = useState<HazardMetadata | null>(null);
+  const activeModeRef = useRef<ViewerMode>("hazard");
+  const activeThresholdRef = useRef(25);
+  const hazardChunkCacheRef = useRef<globalThis.Map<string, Uint8Array>>(new globalThis.Map());
+  const riskChunkCacheRef = useRef<globalThis.Map<string, Float32Array>>(new globalThis.Map());
+  const riskRequestTokenRef = useRef(0);
+
+  const [metadata, setMetadata] = useState<ViewerMetadata | null>(null);
+  const [mode, setMode] = useState<ViewerMode>("hazard");
   const [threshold, setThreshold] = useState(25);
   const deferredThreshold = useDeferredValue(threshold);
-  const [selectedPixel, setSelectedPixel] = useState<SelectedPixelBase | null>(null);
+  const [selectedHazardPixel, setSelectedHazardPixel] = useState<SelectedHazardBase | null>(null);
+  const [selectedRiskLocation, setSelectedRiskLocation] = useState<SelectedRiskLocation | null>(null);
+  const [selectedRiskDetail, setSelectedRiskDetail] = useState<HeatRiskPixelDetail | null>(null);
   const [statusText, setStatusText] = useState("Loading metadata...");
-  const chunkCacheRef = useRef<globalThis.Map<string, Uint8Array>>(new globalThis.Map());
+
+  activeModeRef.current = mode;
+  activeThresholdRef.current = deferredThreshold;
 
   useEffect(() => {
     let cancelled = false;
@@ -114,17 +141,15 @@ function App() {
         throw new Error("Failed to load metadata.json");
       }
 
-      const payload = (await response.json()) as HazardMetadata;
+      const payload = (await response.json()) as ViewerMetadata;
       if (cancelled) {
         return;
       }
 
       setMetadata(payload);
-      const preferredThreshold = payload.thresholds.includes(25)
-        ? 25
-        : payload.thresholds[Math.floor(payload.thresholds.length / 2)];
-      setThreshold(preferredThreshold);
-      setStatusText("Click the map to inspect a pixel distribution.");
+      setMode(payload.defaultMode);
+      setThreshold(payload.defaultThreshold);
+      setStatusText("Click the map to inspect a pixel.");
     }
 
     loadMetadata().catch((error: Error) => {
@@ -138,6 +163,104 @@ function App() {
     };
   }, []);
 
+  async function loadHazardDistribution(
+    viewerMetadata: ViewerMetadata,
+    row: number,
+    col: number,
+    lng: number,
+    lat: number,
+  ) {
+    const hazardMeta = viewerMetadata.modes.hazard;
+    const chunkSize = hazardMeta.pixelQuery.chunkSize;
+    const chunkRow = Math.floor(row / chunkSize);
+    const chunkCol = Math.floor(col / chunkSize);
+    const cacheKey = `${chunkRow}-${chunkCol}`;
+    let buffer = hazardChunkCacheRef.current.get(cacheKey);
+
+    if (!buffer) {
+      const response = await fetch(hazardPixelChunkUrl(viewerMetadata, chunkRow, chunkCol));
+      if (!response.ok) {
+        throw new Error("Failed to load the hazard distribution chunk.");
+      }
+      buffer = new Uint8Array(await response.arrayBuffer());
+      hazardChunkCacheRef.current.set(cacheKey, buffer);
+    }
+
+    const localRow = row - chunkRow * chunkSize;
+    const localCol = col - chunkCol * chunkSize;
+    const actualChunkWidth = Math.min(chunkSize, hazardMeta.rasterGrid.width - chunkCol * chunkSize);
+    const offset = (localRow * actualChunkWidth + localCol) * hazardMeta.pixelQuery.bands;
+    const bins = Array.from(buffer.slice(offset, offset + hazardMeta.pixelQuery.bands));
+    const nodata = hazardMeta.rasterGrid.nodata;
+
+    if (bins.every((value) => value === nodata)) {
+      throw new Error("No valid hazard data exists at this location.");
+    }
+
+    return {
+      row,
+      col,
+      lng,
+      lat,
+      bins,
+    } satisfies SelectedHazardBase;
+  }
+
+  async function loadRiskDetail(
+    viewerMetadata: ViewerMetadata,
+    row: number,
+    col: number,
+    lng: number,
+    lat: number,
+    targetThreshold: number,
+  ) {
+    const token = riskRequestTokenRef.current + 1;
+    riskRequestTokenRef.current = token;
+
+    const riskMeta = viewerMetadata.modes.heatRisk;
+    const chunkSize = riskMeta.pixelQuery.chunkSize;
+    const chunkRow = Math.floor(row / chunkSize);
+    const chunkCol = Math.floor(col / chunkSize);
+    const cacheKey = `${targetThreshold}-${chunkRow}-${chunkCol}`;
+    let buffer = riskChunkCacheRef.current.get(cacheKey);
+
+    if (!buffer) {
+      const response = await fetch(riskPixelChunkUrl(viewerMetadata, targetThreshold, chunkRow, chunkCol));
+      if (!response.ok) {
+        throw new Error("Failed to load the heat risk detail chunk.");
+      }
+      buffer = new Float32Array(await response.arrayBuffer());
+      riskChunkCacheRef.current.set(cacheKey, buffer);
+    }
+
+    const localRow = row - chunkRow * chunkSize;
+    const localCol = col - chunkCol * chunkSize;
+    const actualChunkWidth = Math.min(chunkSize, riskMeta.rasterGrid.width - chunkCol * chunkSize);
+    const fieldsPerPixel = riskMeta.pixelQuery.fields.length;
+    const offset = (localRow * actualChunkWidth + localCol) * fieldsPerPixel;
+    const values = Array.from(buffer.slice(offset, offset + fieldsPerPixel));
+    const [hazard, population, vulnerability, heatRisk] = values;
+
+    if (token !== riskRequestTokenRef.current) {
+      return null;
+    }
+
+    if (heatRisk === riskMeta.rasterGrid.nodata) {
+      throw new Error("No valid heat risk data exists at this location.");
+    }
+
+    return {
+      row,
+      col,
+      lng,
+      lat,
+      hazard,
+      population,
+      vulnerability,
+      heatRisk,
+    } satisfies HeatRiskPixelDetail;
+  }
+
   useEffect(() => {
     if (!metadata || !mapContainerRef.current || mapRef.current) {
       return;
@@ -150,8 +273,8 @@ function App() {
       bounds,
       fitBoundsOptions: { padding: 36 },
       maxBounds: bounds,
-      minZoom: metadata.zoomRange.min,
-      maxZoom: metadata.zoomRange.max + 1,
+      minZoom: metadata.modes.hazard.zoomRange.min,
+      maxZoom: Math.max(metadata.modes.hazard.zoomRange.max, metadata.modes.heatRisk.zoomRange.max) + 1,
       attributionControl: false,
     });
 
@@ -159,37 +282,47 @@ function App() {
     map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-left");
 
     map.on("load", () => {
-      const insertBeforeId = findHazardInsertBeforeId(map);
-      for (const thresholdValue of metadata.thresholds) {
-        map.addSource(sourceIdForThreshold(thresholdValue), {
-          type: "raster",
-          tiles: [`/data/tiles/${thresholdValue}/{z}/{x}/{y}.png`],
-          tileSize: metadata.tileSize,
-          bounds: metadata.bounds,
-          minzoom: metadata.zoomRange.min,
-          maxzoom: metadata.zoomRange.max,
-        });
+      const insertBeforeId = findRasterInsertBeforeId(map);
 
-        map.addLayer({
-          id: layerIdForThreshold(thresholdValue),
-          type: "raster",
-          source: sourceIdForThreshold(thresholdValue),
-          layout: {
-            visibility: thresholdValue === deferredThreshold ? "visible" : "none",
-          },
-          paint: {
-            "raster-opacity": thresholdValue === deferredThreshold ? HAZARD_TARGET_OPACITY : 0,
-            "raster-resampling": "linear",
-            "raster-fade-duration": 0,
-            "raster-opacity-transition": {
-              duration: HAZARD_SWITCH_DURATION_MS,
-              delay: 0,
+      for (const availableMode of metadata.availableModes) {
+        const modeMetadata = metadata.modes[availableMode];
+        for (const thresholdValue of metadata.thresholds) {
+          map.addSource(sourceIdFor(availableMode, thresholdValue), {
+            type: "raster",
+            tiles: [modeTileUrl(metadata, availableMode, thresholdValue)],
+            tileSize: modeMetadata.tileSize,
+            bounds: modeMetadata.bounds,
+            minzoom: modeMetadata.zoomRange.min,
+            maxzoom: modeMetadata.zoomRange.max,
+          });
+
+          const isInitiallyVisible =
+            availableMode === metadata.defaultMode && thresholdValue === metadata.defaultThreshold;
+
+          map.addLayer(
+            {
+              id: layerIdFor(availableMode, thresholdValue),
+              type: "raster",
+              source: sourceIdFor(availableMode, thresholdValue),
+              layout: {
+                visibility: isInitiallyVisible ? "visible" : "none",
+              },
+              paint: {
+                "raster-opacity": isInitiallyVisible ? HAZARD_TARGET_OPACITY : 0,
+                "raster-resampling": "linear",
+                "raster-fade-duration": 0,
+                "raster-opacity-transition": {
+                  duration: HAZARD_SWITCH_DURATION_MS,
+                  delay: 0,
+                },
+              },
             },
-          },
-        }, insertBeforeId);
+            insertBeforeId,
+          );
+        }
       }
 
-      currentVisibleThresholdRef.current = deferredThreshold;
+      currentVisibleLayerKeyRef.current = `${metadata.defaultMode}:${metadata.defaultThreshold}`;
 
       map.addSource(PIXEL_SOURCE_ID, {
         type: "geojson",
@@ -238,60 +371,48 @@ function App() {
     });
 
     map.on("click", async (event) => {
+      const currentMode = activeModeRef.current;
+      const currentThreshold = activeThresholdRef.current;
       const lng = event.lngLat.lng;
       const lat = event.lngLat.lat;
-      const { row, col } = rowColFromLngLat(lng, lat, metadata.transform);
 
-      if (!insideRaster(row, col, metadata.rasterShape.width, metadata.rasterShape.height)) {
-        setSelectedPixel(null);
-        setStatusText("The clicked location is outside the raster extent.");
-        const source = map.getSource(PIXEL_SOURCE_ID) as GeoJSONSource | undefined;
-        source?.setData(emptyPixelFeatureCollection());
-        return;
-      }
-
-      setStatusText("Loading pixel distribution...");
-      const chunkSize = metadata.pixelChunks.chunkSize;
-      const chunkRow = Math.floor(row / chunkSize);
-      const chunkCol = Math.floor(col / chunkSize);
-      const cacheKey = `${chunkRow}-${chunkCol}`;
-      let buffer = chunkCacheRef.current.get(cacheKey);
-
-      if (!buffer) {
-        const response = await fetch(pixelChunkUrl(metadata, chunkRow, chunkCol));
-        if (!response.ok) {
-          setStatusText("Failed to load the pixel distribution chunk.");
+      try {
+        if (currentMode === "hazard") {
+          const hazardGrid = metadata.modes.hazard.rasterGrid;
+          const { row, col } = rowColFromLngLat(lng, lat, hazardGrid.transform);
+          if (!insideRaster(row, col, hazardGrid.width, hazardGrid.height)) {
+            throw new Error("The clicked location is outside the hazard raster extent.");
+          }
+          setStatusText("Loading hazard distribution...");
+          const distribution = await loadHazardDistribution(metadata, row, col, lng, lat);
+          setSelectedHazardPixel(distribution);
+          setStatusText("Click another location to inspect a different hazard pixel.");
           return;
         }
-        buffer = new Uint8Array(await response.arrayBuffer());
-        chunkCacheRef.current.set(cacheKey, buffer);
+
+        const riskGrid = metadata.modes.heatRisk.rasterGrid;
+        const { row, col } = rowColFromLngLat(lng, lat, riskGrid.transform);
+        if (!insideRaster(row, col, riskGrid.width, riskGrid.height)) {
+          throw new Error("The clicked location is outside the heat risk raster extent.");
+        }
+        setStatusText("Loading heat risk detail...");
+        const detail = await loadRiskDetail(metadata, row, col, lng, lat, currentThreshold);
+        if (!detail) {
+          return;
+        }
+        setSelectedRiskLocation({ row, col, lng, lat });
+        setSelectedRiskDetail(detail);
+        setStatusText("Click another location to inspect a different heat risk cell.");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to inspect the selected pixel.";
+        setStatusText(message);
+        if (currentMode === "hazard") {
+          setSelectedHazardPixel(null);
+        } else {
+          setSelectedRiskLocation(null);
+          setSelectedRiskDetail(null);
+        }
       }
-
-      const localRow = row - chunkRow * chunkSize;
-      const localCol = col - chunkCol * chunkSize;
-      const actualChunkWidth = Math.min(chunkSize, metadata.rasterShape.width - chunkCol * chunkSize);
-      const offset = (localRow * actualChunkWidth + localCol) * metadata.pixelChunks.bands;
-      const bins = Array.from(buffer.slice(offset, offset + metadata.pixelChunks.bands));
-
-      if (bins.every((value) => value === metadata.nodata)) {
-        setSelectedPixel(null);
-        setStatusText("No valid data exists at this location.");
-        const source = map.getSource(PIXEL_SOURCE_ID) as GeoJSONSource | undefined;
-        source?.setData(emptyPixelFeatureCollection());
-        return;
-      }
-
-      setSelectedPixel({
-        row,
-        col,
-        lng,
-        lat,
-        bins,
-      });
-
-      const source = map.getSource(PIXEL_SOURCE_ID) as GeoJSONSource | undefined;
-      source?.setData(pixelFeatureCollection(row, col, metadata.transform));
-      setStatusText("Click another location to inspect a different pixel.");
     });
 
     mapRef.current = map;
@@ -302,74 +423,146 @@ function App() {
       }
       map.remove();
       mapRef.current = null;
-      currentVisibleThresholdRef.current = null;
+      currentVisibleLayerKeyRef.current = null;
     };
   }, [metadata]);
 
   useEffect(() => {
+    if (!metadata) {
+      return;
+    }
+    if (mode === "hazard" && !selectedHazardPixel) {
+      setStatusText("Click the map to inspect a hazard pixel.");
+    }
+    if (mode === "heatRisk" && !selectedRiskLocation) {
+      setStatusText("Click the map to inspect a heat risk cell.");
+    }
+  }, [metadata, mode, selectedHazardPixel, selectedRiskLocation]);
+
+  useEffect(() => {
     const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) {
+    if (!map || !map.isStyleLoaded() || !metadata) {
       return;
     }
 
-    const nextThreshold = deferredThreshold;
-    const previousThreshold = currentVisibleThresholdRef.current;
-    const nextLayer = layerIdForThreshold(nextThreshold);
-    if (!map.getLayer(nextLayer)) {
-      return;
-    }
+    const nextLayerKey = `${mode}:${deferredThreshold}`;
+    const previousLayerKey = currentVisibleLayerKeyRef.current;
 
     if (thresholdHideTimeoutRef.current !== null) {
       window.clearTimeout(thresholdHideTimeoutRef.current);
       thresholdHideTimeoutRef.current = null;
     }
 
-    if (previousThreshold === null) {
-      map.setLayoutProperty(nextLayer, "visibility", "visible");
-      map.setPaintProperty(nextLayer, "raster-opacity", HAZARD_TARGET_OPACITY);
-      currentVisibleThresholdRef.current = nextThreshold;
+    const nextLayer = layerIdFor(mode, deferredThreshold);
+    if (!map.getLayer(nextLayer)) {
       return;
     }
 
-    if (previousThreshold === nextThreshold) {
+    if (previousLayerKey === nextLayerKey) {
       return;
     }
-
-    const previousLayer = layerIdForThreshold(previousThreshold);
 
     map.setLayoutProperty(nextLayer, "visibility", "visible");
     map.setPaintProperty(nextLayer, "raster-opacity", HAZARD_TARGET_OPACITY);
-    if (map.getLayer(previousLayer)) {
-      map.setLayoutProperty(previousLayer, "visibility", "visible");
-      map.setPaintProperty(previousLayer, "raster-opacity", 0);
+
+    if (previousLayerKey) {
+      const [previousMode, previousThreshold] = previousLayerKey.split(":");
+      const previousLayer = layerIdFor(previousMode as ViewerMode, Number(previousThreshold));
+      if (map.getLayer(previousLayer)) {
+        map.setLayoutProperty(previousLayer, "visibility", "visible");
+        map.setPaintProperty(previousLayer, "raster-opacity", 0);
+      }
     }
 
-    currentVisibleThresholdRef.current = nextThreshold;
-
+    currentVisibleLayerKeyRef.current = nextLayerKey;
     thresholdHideTimeoutRef.current = window.setTimeout(() => {
-      hideInactiveHazardLayers(map, metadata?.thresholds ?? [], nextThreshold);
+      hideInactiveRasterLayers(map, metadata, mode, deferredThreshold);
       thresholdHideTimeoutRef.current = null;
     }, HAZARD_SWITCH_DURATION_MS + 120);
-  }, [deferredThreshold, metadata]);
+  }, [deferredThreshold, metadata, mode]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !metadata) {
+      return;
+    }
+
+    const source = map.getSource(PIXEL_SOURCE_ID) as GeoJSONSource | undefined;
+    if (!source) {
+      return;
+    }
+
+    if (mode === "hazard" && selectedHazardPixel) {
+      source.setData(pixelFeatureCollection(selectedHazardPixel.row, selectedHazardPixel.col, metadata.modes.hazard.rasterGrid.transform));
+      return;
+    }
+
+    if (mode === "heatRisk" && selectedRiskLocation) {
+      source.setData(pixelFeatureCollection(selectedRiskLocation.row, selectedRiskLocation.col, metadata.modes.heatRisk.rasterGrid.transform));
+      return;
+    }
+
+    source.setData(emptyPixelFeatureCollection());
+  }, [metadata, mode, selectedHazardPixel, selectedRiskLocation]);
+
+  useEffect(() => {
+    if (!metadata || !selectedRiskLocation) {
+      return;
+    }
+
+    const viewerMetadata = metadata;
+    const riskLocation = selectedRiskLocation;
+    let cancelled = false;
+
+    async function refreshRiskDetail() {
+      try {
+        const detail = await loadRiskDetail(
+          viewerMetadata,
+          riskLocation.row,
+          riskLocation.col,
+          riskLocation.lng,
+          riskLocation.lat,
+          deferredThreshold,
+        );
+        if (!cancelled && detail) {
+          setSelectedRiskDetail(detail);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          const message = error instanceof Error ? error.message : "Failed to refresh heat risk detail.";
+          setStatusText(message);
+          setSelectedRiskDetail(null);
+        }
+      }
+    }
+
+    refreshRiskDetail();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [deferredThreshold, metadata, selectedRiskLocation]);
+
+  const currentModeMetadata = useMemo(() => (metadata ? metadata.modes[mode] : null), [metadata, mode]);
 
   const currentStats = useMemo(() => {
-    if (!metadata) {
+    if (!currentModeMetadata) {
       return null;
     }
-    return metadata.statsByThreshold[String(deferredThreshold)];
-  }, [deferredThreshold, metadata]);
+    return currentModeMetadata.statsByThreshold[String(deferredThreshold)];
+  }, [currentModeMetadata, deferredThreshold]);
 
-  const displayedPixel = useMemo<PixelDistribution | null>(() => {
-    if (!selectedPixel) {
+  const displayedHazardPixel = useMemo<HazardPixelDistribution | null>(() => {
+    if (!selectedHazardPixel) {
       return null;
     }
     return {
-      ...selectedPixel,
-      hazardDays: hazardDaysForThreshold(selectedPixel.bins, deferredThreshold),
+      ...selectedHazardPixel,
+      hazardDays: hazardDaysForThreshold(selectedHazardPixel.bins, deferredThreshold),
     };
-  }, [deferredThreshold, selectedPixel]);
+  }, [deferredThreshold, selectedHazardPixel]);
 
-  if (!metadata) {
+  if (!metadata || !currentModeMetadata) {
     return <div className="loading-shell">{statusText}</div>;
   }
 
@@ -380,11 +573,11 @@ function App() {
           <div className="map-header">
             <div>
               <p className="eyebrow">Heat Threshold Explorer</p>
-              <h1>{metadata.cityLabel} hazard viewer</h1>
+              <h1>{metadata.cityLabel} hazard and risk viewer</h1>
             </div>
             <div className="map-meta">
-              <span>{metadata.sourceFile}</span>
-              <span>{metadata.generated.tilesWritten.toLocaleString("en-US")} tiles generated</span>
+              <span>{mode === "hazard" ? metadata.rawDataPaths.hazard : metadata.rawDataPaths.populationNairobi}</span>
+              <span>{currentModeMetadata.generated.tilesWritten.toLocaleString("en-US")} tiles generated</span>
             </div>
           </div>
           <div ref={mapContainerRef} className="map-canvas" />
@@ -392,9 +585,29 @@ function App() {
 
         <aside className="control-panel">
           <section className="panel-block panel-hero">
-            <p className="eyebrow">Threshold</p>
-            <h2>Hazard definition</h2>
-            <p className="panel-copy">Hazard days are computed from temperature bins whose lower edge is greater than or equal to the active threshold.</p>
+            <p className="eyebrow">Viewer</p>
+            <h2>{mode === "hazard" ? "Hazard mode" : "Heat risk mode"}</h2>
+            <div className="mode-toggle" role="tablist" aria-label="Viewer mode">
+              <button
+                type="button"
+                className={mode === "hazard" ? "mode-toggle-button active" : "mode-toggle-button"}
+                onClick={() => setMode("hazard")}
+              >
+                Hazard
+              </button>
+              <button
+                type="button"
+                className={mode === "heatRisk" ? "mode-toggle-button active" : "mode-toggle-button"}
+                onClick={() => setMode("heatRisk")}
+              >
+                Heat Risk
+              </button>
+            </div>
+            <p className="panel-copy">
+              {mode === "hazard"
+                ? metadata.modes.hazard.definition
+                : metadata.modes.heatRisk.formula}
+            </p>
             <label className="threshold-slider">
               <span>Temperature threshold</span>
               <strong>{threshold}°C</strong>
@@ -413,15 +626,43 @@ function App() {
             </div>
           </section>
 
-          {currentStats ? <StatsPanel stats={currentStats} /> : null}
-          <HazardLegend metadata={metadata} />
+          {currentStats ? (
+            <StatsPanel
+              title={mode === "hazard" ? "Hazard summary" : "Heat risk summary"}
+              subtitle={mode === "hazard" ? "Valid hazard pixels" : "Valid 100m risk cells"}
+              stats={currentStats}
+            />
+          ) : null}
 
-          {displayedPixel ? (
-            <DistributionChart distribution={displayedPixel} threshold={deferredThreshold} labels={metadata.binLabels} />
+          <HazardLegend
+            title={mode === "hazard" ? "Hazard legend" : "Heat risk legend"}
+            unitLabel={mode === "hazard" ? "days" : "risk"}
+            domain={currentModeMetadata.legendDomain}
+            stops={currentModeMetadata.legendStops}
+          />
+
+          {mode === "hazard" ? (
+            displayedHazardPixel ? (
+              <DistributionChart
+                distribution={displayedHazardPixel}
+                threshold={deferredThreshold}
+                labels={metadata.modes.hazard.binLabels}
+              />
+            ) : (
+              <section className="panel-block empty-state">
+                <div className="panel-heading">
+                  <span>Hazard pixel detail</span>
+                  <small>Single click</small>
+                </div>
+                <p>{statusText}</p>
+              </section>
+            )
+          ) : selectedRiskDetail ? (
+            <HeatRiskDetailPanel detail={selectedRiskDetail} threshold={deferredThreshold} />
           ) : (
             <section className="panel-block empty-state">
               <div className="panel-heading">
-                <span>Pixel inspection</span>
+                <span>Heat risk detail</span>
                 <small>Single click</small>
               </div>
               <p>{statusText}</p>

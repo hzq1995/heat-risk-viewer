@@ -1,7 +1,7 @@
-import type { PixelDistribution } from "../types";
+import type { HazardPixelDistribution } from "../types";
 
 type DistributionChartProps = {
-  distribution: PixelDistribution;
+  distribution: HazardPixelDistribution;
   threshold: number;
   labels: string[];
 };

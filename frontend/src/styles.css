@@ -151,6 +151,36 @@ select {
   line-height: 1.55;
 }
 
+.mode-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.mode-toggle-button {
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid #dbe4f0;
+  background: #ffffff;
+  color: #3f5873;
+  font-weight: 600;
+  cursor: pointer;
+  transition: 160ms ease;
+}
+
+.mode-toggle-button:hover {
+  border-color: #b7caea;
+  color: #10233d;
+}
+
+.mode-toggle-button.active {
+  background: #165dff;
+  border-color: #165dff;
+  color: #ffffff;
+  box-shadow: 0 10px 22px rgba(22, 93, 255, 0.2);
+}
+
 .panel-heading {
   display: flex;
   align-items: baseline;
@@ -256,6 +286,21 @@ select {
   background: var(--panel-strong);
   display: grid;
   gap: 6px;
+}
+
+.formula-card {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: #f6f9ff;
+  border: 1px solid #e1eaff;
+}
+
+.formula-card p {
+  margin: 0;
+  color: #36506c;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .pixel-summary span,

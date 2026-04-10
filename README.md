@@ -1,95 +1,93 @@
-# Nairobi Heat Hazard Viewer
+# Nairobi Heat Hazard and Risk Viewer
 
-A research prototype for visualizing and analyzing heat hazard data over Nairobi. The application generates multi-level heat hazard tiles from GeoTIFF data and provides an interactive React-based interface with real-time threshold adjustment and pixel-level temperature distribution analysis.
+A research prototype for exploring two linked indicators over Nairobi:
 
-![Application Screenshot](WebScreenShot.png)
+- `Hazard`: days at or above a temperature threshold
+- `Heat Risk`: `hazard x population x (1 + vulnerability)`
+
+The project uses a React frontend with pre-generated raster tiles and click-query chunks. Hazard is shown on the original Nairobi hazard grid, while Heat Risk is computed on the aligned 100m population grid.
+
+## Screenshots
+
+### Hazard Mode
+
+![Hazard mode](Hazard.png)
+
+### Heat Risk Mode
+
+![Heat Risk mode](HeatRisk.png)
+
+## Repository Layout
+
+### Source code
+
+- `frontend/` React + TypeScript + Vite app
+- `scripts/` raster preprocessing scripts
+- `tests/` Python tests for preprocessing logic
+
+### Input data kept in the repo
+
+- `data/raw/hazard/temp_dist_nairobi.tif`
+- `data/raw/population/ken_pop_2025_CN_100m_R2025A_v1.tif`
+- `data/raw/population/ken_pop_nairobi_100m.tif`
+- `data/raw/vulnerability/population_composite_nairobi.tif`
+
+### Generated files not committed
+
+- `frontend/public/data/` generated tiles and metadata
+- `data/derived/` derived helper rasters
+- `frontend/dist/`, `frontend/node_modules/`, `.vite/`, `*.tsbuildinfo`
 
 ## Features
 
-- **Interactive Map Display**: Visualize hazard days (temperature ≥ threshold) across Nairobi with multi-level zoom support
-- **Real-time Threshold Adjustment**: Dynamically adjust temperature thresholds and see instant map updates
-- **Pixel-Level Analysis**: Click any pixel to view detailed temperature distribution across 50 temperature bins for the entire year
-- **Statistical Summary**: View aggregated statistics and heat hazard legend for the complete dataset
-- **Responsive UI**: Split-panel layout with map on the left and control panel on the right
+- Hazard / Heat Risk mode switch
+- Shared temperature-threshold slider
+- Smooth map updates without recreating the map
+- Hazard pixel inspection with full yearly temperature distribution
+- Heat Risk cell inspection with hazard, population, vulnerability, and risk breakdown
+- Administrative boundaries and labels stay visible above raster content
 
-## Project Structure
+## Requirements
 
-```
-├── frontend/              # React + TypeScript frontend
-│   ├── src/
-│   │   ├── App.tsx       # Main application component
-│   │   ├── components/   # React components
-│   │   ├── types.ts      # TypeScript type definitions
-│   │   └── styles.css    # Styling
-│   ├── public/
-│   │   └── data/         # Pre-generated hazard tiles and metadata
-│   └── vite.config.ts    # Vite configuration
-├── scripts/              # Python build scripts
-│   └── build_hazard_tiles.py    # Generates tiles from GeoTIFF
-└── tests/               # Test suite
-```
-
-## Installation
-
-### Prerequisites
-- Python 3.8+
-- Node.js 16+
+- Python 3.12+
+- Node.js 24+
 - npm
 
-### Setup Steps
+## Setup
 
-1. **Generate static hazard tile data**
+1. Install frontend dependencies
 
-```bash
-python scripts/build_hazard_tiles.py --clean
-```
-
-This processes `temp_dist_nairobi.tif` and generates multi-level WebGL/tile data.
-
-2. **Install frontend dependencies**
-
-```bash
+```powershell
 npm --prefix frontend install
 ```
 
-3. **Start the development server**
+2. Generate frontend-ready raster assets
 
-```bash
+```powershell
+npm run data:build
+```
+
+3. Start the development server
+
+```powershell
 npm run dev
 ```
 
-From the `frontend` directory, you can alternatively run `npm run dev` directly.
+## Build and Test
 
-## Usage
+Run preprocessing and frontend tests:
 
-- **Left Panel**: Interactive map showing hazard days for the current threshold
-- **Right Panel**: 
-  - Slider to adjust temperature threshold (°C)
-  - Heat hazard legend
-  - Summary statistics
-- **Click Map Pixels**: Displays a detailed histogram showing temperature distribution for the selected pixel across all 50 temperature bins
+```powershell
+npm run test
+```
 
-## Build
+Build the frontend:
 
-To build for production:
-
-```bash
+```powershell
 npm run build
 ```
 
-The output will be in `frontend/dist/`.
+## Notes
 
-## Technology Stack
-
-- **Frontend**: React 18, TypeScript, Vite
-- **Visualization**: Custom WebGL/Canvas-based tile renderer
-- **Data Processing**: Python, GDAL/Rasterio
-- **Build Tool**: Vite
-
-## License
-
-Research prototype. For academic use.
-
-## About
-
-Based on Nairobi heat hazard analysis from GeoTIFF source data. This tool enables exploration of extreme heat days at multiple temperature thresholds and spatial scales.
+- The repo keeps the raw Nairobi input rasters so others can reproduce the generated web assets locally.
+- Generated tiles are intentionally excluded from version control because they are large and can be rebuilt with `npm run data:build`.
