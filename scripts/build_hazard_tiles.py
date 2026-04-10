@@ -270,7 +270,7 @@ def build_outputs(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build static hazard tiles and pixel chunks for the Nairobi viewer.")
-    parser.add_argument("--source", default="temp_dist_nairobi.tif", type=Path)
+    parser.add_argument("--source", default=Path("data/raw/hazard/temp_dist_nairobi.tif"), type=Path)
     parser.add_argument("--output", default=Path("frontend/public/data"), type=Path)
     parser.add_argument("--zoom-min", default=ZOOM_MIN, type=int)
     parser.add_argument("--zoom-max", default=ZOOM_MAX, type=int)

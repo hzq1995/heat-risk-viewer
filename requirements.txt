@@ -1,0 +1,4 @@
+mercantile
+numpy
+Pillow
+rasterio

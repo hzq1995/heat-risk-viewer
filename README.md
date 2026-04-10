@@ -58,21 +58,48 @@ The project uses a React frontend with pre-generated raster tiles and click-quer
 - Node.js 24+
 - npm
 
+## Data Generation
+
+The frontend reads generated files from `frontend/public/data/`. Those files are not committed, so a fresh clone needs one preprocessing step before the site can display the rasters.
+
+The tile build writes:
+
+- `frontend/public/data/tiles/` raster tiles used by the map
+- `frontend/public/data/pixels/` click-query chunks
+- `frontend/public/data/metadata.json` metadata used by the frontend
+
+If these files are missing, the site will load but the raster layers will not appear.
+
 ## Setup
 
-1. Install frontend dependencies
+1. Install Python dependencies for tile generation
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+2. Install frontend dependencies
 
 ```powershell
 npm --prefix frontend install
 ```
 
-2. Generate frontend-ready raster assets
+3. Generate frontend-ready raster assets and tiles
 
 ```powershell
 npm run data:build
 ```
 
-3. Start the development server
+By default, this command reads `data/raw/hazard/temp_dist_nairobi.tif` and rebuilds the generated viewer assets under `frontend/public/data/`.
+
+The repo also includes the Nairobi-level population and vulnerability rasters used by the project:
+
+- `data/raw/population/ken_pop_nairobi_100m.tif`
+- `data/raw/vulnerability/population_composite_nairobi.tif`
+
+Keep any extended preprocessing outputs under `frontend/public/data/` so the frontend can load them without path changes.
+
+4. Start the development server
 
 ```powershell
 npm run dev
@@ -97,3 +124,4 @@ npm run build
 - The repo keeps the Nairobi-level input rasters so others can reproduce the generated web assets locally.
 - The full-country Kenya population raster is intentionally excluded from version control because it is large and only needed for the one-time crop step.
 - Generated tiles are intentionally excluded from version control because they are large and can be rebuilt with `npm run data:build`.
+- If you change any raw raster input, rerun `npm run data:build` before starting the frontend.
