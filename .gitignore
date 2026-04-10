@@ -1,8 +1,70 @@
+# Dependencies
+node_modules/
 frontend/node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
 frontend/dist/
 frontend/.vite/
-frontend/public/data/tiles/
-frontend/public/data/pixels/
+build/
+
+# Generated data (large files)
+data/raw/
+data/derived/
+frontend/public/data/hazard/
+frontend/public/data/risk/
 frontend/public/data/metadata.json
+
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# GIS/Raster data (keep only code, not large binary data)
+*.tif
+*.tiff
+*.tfw
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.sbn
+*.sbx
+*.aux.xml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Temporary files
+*.tmp
+*.bak
+*.log
+temp_*.json
+temp_*.tif*
