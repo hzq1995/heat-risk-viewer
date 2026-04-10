@@ -141,12 +141,24 @@ function App() {
         throw new Error("Failed to load metadata.json");
       }
 
-      const payload = (await response.json()) as ViewerMetadata;
+      const payload = (await response.json()) as Partial<ViewerMetadata>;
       if (cancelled) {
         return;
       }
 
-      setMetadata(payload);
+      if (
+        !payload
+        || !payload.modes
+        || !payload.modes.hazard
+        || !payload.modes.heatRisk
+        || !payload.availableModes
+        || payload.defaultMode === undefined
+        || payload.defaultThreshold === undefined
+      ) {
+        throw new Error("metadata.json is outdated or incomplete. Run `npm run data:build` and reload the page.");
+      }
+
+      setMetadata(payload as ViewerMetadata);
       setMode(payload.defaultMode);
       setThreshold(payload.defaultThreshold);
       setStatusText("Click the map to inspect a pixel.");
