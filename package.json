@@ -1,0 +1,11 @@
+{
+  "name": "nairobi-hazard-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "test": "python -m unittest tests.test_build_hazard_tiles -v && npm --prefix frontend run test",
+    "data:build": "python scripts/build_hazard_tiles.py --clean"
+  }
+}

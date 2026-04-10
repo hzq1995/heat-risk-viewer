@@ -1,0 +1,8 @@
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/public/data/tiles/
+frontend/public/data/pixels/
+frontend/public/data/metadata.json
+__pycache__/
+*.pyc
